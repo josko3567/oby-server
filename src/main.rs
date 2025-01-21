@@ -2,8 +2,9 @@ mod db;
 mod shared;
 mod requests_database;
 
-use std::{net::TcpStream, path::PathBuf, sync::{Arc, Mutex}};
+use std::{net::TcpStream, path::PathBuf, sync::{Arc, Mutex}, task};
 
+use actix_cors::Cors;
 use actix_web::{web, App, HttpServer};
 use db::DatabaseElement;
 use shared::dbt as dbt;
@@ -62,7 +63,7 @@ fn fill_db(db: &sled::Db) {
 
     vec![
         dbt::Offer {
-            name: "Mala Kava".to_string(),
+            name: "Kava".to_string(),
             description: "Mala kava od sviježi sjemenki.".to_string(),
             price_integer: 1,
             price_fraction: 50
@@ -197,13 +198,19 @@ async fn main() -> std::io::Result<()> {
         fill_db(&*db_safe);
     }
 
+    let db_data_db = web::Data::new(db.clone());
+    let db_data_html = web::Data::new(db.clone());
+
+    let IP = req::get_local_ip_address().expect("Not connected to a network dummy!");
+
     // let server_db = 
-    HttpServer::new(move || 
+    let db_server = HttpServer::new(move || 
         {
             App::new()
                 .wrap(actix_web::middleware::Logger::default())
                 .wrap(actix_web::middleware::Logger::new("%a %r"))
-                .app_data(web::Data::new(db.clone()))
+                .wrap(Cors::permissive())
+                .app_data(db_data_db.clone())
 
                 .service(requests_database::handler_tables)
                 .service(requests_database::handler_tables_specific)
@@ -215,11 +222,40 @@ async fn main() -> std::io::Result<()> {
                 .service(requests_database::handler_offers_insert)
                 .service(requests_database::handler_offers_delete)
 
+                .service(requests_database::handler_orders)
+                .service(requests_database::handler_orders_specific)
+                .service(requests_database::handler_orders_insert)
+                .service(requests_database::handler_orders_delete)
+                .service(requests_database::handler_orders_finish)
+
+                .service(requests_database::handler_offers_tables)
+
         }
     )
-    .bind(("127.0.0.1", 8656))?
-    .run()
-    .await
+    .bind((IP.clone(), req::DB_PORT))?
+    .run();
+
+    let html_server = HttpServer::new(
+        move || {
+            App::new()
+                .wrap(actix_web::middleware::Logger::default())
+                .wrap(actix_web::middleware::Logger::new("%a %r"))
+                .app_data(db_data_html.clone())
+                .wrap(Cors::permissive())
+                .service(requests_database::handler_server)
+
+        }
+    )
+    .bind((IP.clone(), req::HTML_PORT))?
+    .run();
+
+    let server1_task = tokio::task::spawn(db_server);
+    let server2_task = tokio::task::spawn(html_server);
+
+    // Wait for both servers to complete
+    let _ = tokio::try_join!(server1_task, server2_task);
+
+    Ok(())
 
 }
 

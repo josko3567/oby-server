@@ -106,8 +106,7 @@ pub trait DatabaseElement:
     /// and searching with [`get_templated`](DatabaseElement::get_templated).
     fn qualified_identifier_mainless(&self) -> String {
         let mut partial = vec![
-            Self::namespace().to_string(),
-            self.status_to_string(),
+            self.qualified_identifier_mainless_secondless()
         ];
 
         self.secondary_identifiers_try_to_string()
@@ -115,6 +114,23 @@ pub trait DatabaseElement:
 
         partial.join(Self::QUALIFIED_SEPARATOR)
     }
+
+        /// The qualified separator with one part missing, the main
+    /// identifier.
+    /// 
+    /// Used for building the actual qualified identifier with
+    /// [`qualified_identifier`](DatabaseElement::qualified_identifier)
+    /// and searching with [`get_templated`](DatabaseElement::get_templated).
+    fn qualified_identifier_mainless_secondless(&self) -> String {
+        let mut partial = vec![
+            Self::namespace().to_string(),
+            self.status_to_string(),
+        ];
+
+        partial.join(Self::QUALIFIED_SEPARATOR)
+    }
+
+
 
     /// The qualified identifier that is unique to any instance of any
     /// element type inside the database.
@@ -240,6 +256,56 @@ pub trait DatabaseElement:
 
         Ok(results)
 
+    }
+
+    fn get_status(&self, db: &sled::Db) -> Result<Vec<Self>, String> {
+        let mut results: Vec<Self> = Vec::new();
+
+        for kv_pair 
+        in db.scan_prefix(self.qualified_identifier_mainless_secondless()) {
+
+            match kv_pair {
+                Ok((_key, sled_raw_value)) => {
+                    let raw_value = sled_raw_value.to_vec();
+                    let value = match bincode::deserialize::<Self>(
+                        &raw_value
+                    ) {
+                        Ok(value) => value,
+                        Err(err) => return Err(err.to_string())
+                    };
+                    results.push(value)
+                }
+                Err(_) => {}
+            }
+
+        }
+
+        Ok(results)
+    }
+
+    fn get_all(db: &sled::Db) -> Result<Vec<Self>, String> {
+        let mut results: Vec<Self> = Vec::new();
+
+        for kv_pair 
+        in db.scan_prefix(Self::namespace()) {
+
+            match kv_pair {
+                Ok((_key, sled_raw_value)) => {
+                    let raw_value = sled_raw_value.to_vec();
+                    let value = match bincode::deserialize::<Self>(
+                        &raw_value
+                    ) {
+                        Ok(value) => value,
+                        Err(err) => return Err(err.to_string())
+                    };
+                    results.push(value)
+                }
+                Err(_) => {}
+            }
+
+        }
+
+        Ok(results)
     }
 
 }
